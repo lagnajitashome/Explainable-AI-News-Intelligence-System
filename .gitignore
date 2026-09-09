@@ -1,1 +1,24 @@
+# DVC-managed data
 /data
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# MLflow generated files
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
