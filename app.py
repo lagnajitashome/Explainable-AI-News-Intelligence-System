@@ -2,6 +2,7 @@ import streamlit as st
 import joblib
 import pandas as pd
 
+
 # -----------------------------------
 # PAGE CONFIGURATION
 # -----------------------------------
@@ -14,12 +15,16 @@ st.set_page_config(
 
 
 # -----------------------------------
-# LOAD SAVED MODEL AND VECTORIZER
+# LOAD MODEL AND TF-IDF VECTORIZER
 # -----------------------------------
 
-model = joblib.load("models/random_forest_model.pkl")
+model = joblib.load(
+    "models/random_forest_model.pkl"
+)
 
-tfidf = joblib.load("models/tfidf_vectorizer.pkl")
+tfidf = joblib.load(
+    "models/tfidf_vectorizer.pkl"
+)
 
 
 # -----------------------------------
@@ -29,8 +34,8 @@ tfidf = joblib.load("models/tfidf_vectorizer.pkl")
 st.title("📰 Fake News Detection System")
 
 st.write(
-    "Enter a news article or news text below to check whether it is "
-    "likely to be REAL or FAKE."
+    "Enter a news article or news text below to check whether "
+    "it is likely to be REAL or FAKE."
 )
 
 
@@ -46,49 +51,100 @@ news_text = st.text_area(
 
 
 # -----------------------------------
-# PREDICTION
+# ANALYZE NEWS
 # -----------------------------------
 
 if st.button("🔍 Analyze News"):
 
-    if news_text.strip() == "":
-        st.warning("Please enter some news text.")
+    if not news_text.strip():
+
+        st.warning(
+            "Please enter some news text."
+        )
 
     else:
 
-        # -----------------------------------
-        # CONVERT TEXT TO TF-IDF
-        # -----------------------------------
+        # ===================================
+        # TF-IDF TRANSFORMATION
+        # ===================================
 
-        news_tfidf = tfidf.transform([news_text])
-
-
-        # -----------------------------------
-        # MAKE PREDICTION
-        # -----------------------------------
-
-        prediction = model.predict(news_tfidf)[0]
-
-        probabilities = model.predict_proba(news_tfidf)[0]
-
-        confidence = max(probabilities) * 100
+        news_tfidf = tfidf.transform(
+            [news_text]
+        )
 
 
         # -----------------------------------
-        # DISPLAY RESULT
+        # FEATURE COVERAGE
         # -----------------------------------
 
-        st.subheader("Prediction Result")
+        recognized_features = news_tfidf.nnz
+        total_features = news_tfidf.shape[1]
 
-        if prediction == 1:
-            st.error("🚨 FAKE NEWS DETECTED")
+        st.caption(
+            f"Recognized TF-IDF features: "
+            f"{recognized_features} / {total_features}"
+        )
+
+
+        # ===================================
+        # MODEL PREDICTION
+        # ===================================
+
+        prediction = model.predict(
+            news_tfidf
+        )[0]
+
+        probabilities = model.predict_proba(
+            news_tfidf
+        )[0]
+
+
+        # -----------------------------------
+        # CLASS MAPPING
+        #
+        # 0 = FAKE
+        # 1 = REAL
+        # -----------------------------------
+
+        fake_probability = (
+            probabilities[0] * 100
+        )
+
+        real_probability = (
+            probabilities[1] * 100
+        )
+
+        confidence = max(
+            fake_probability,
+            real_probability
+        )
+
+
+        # ===================================
+        # PREDICTION RESULT
+        # ===================================
+
+        st.subheader(
+            "Prediction Result"
+        )
+
+
+        if prediction == 0:
+
+            st.error(
+                "🚨 FAKE NEWS DETECTED"
+            )
+
         else:
-            st.success("✅ REAL NEWS DETECTED")
+
+            st.success(
+                "✅ REAL NEWS DETECTED"
+            )
 
 
-        # -----------------------------------
+        # ===================================
         # CONFIDENCE
-        # -----------------------------------
+        # ===================================
 
         st.metric(
             "Model Confidence",
@@ -96,21 +152,70 @@ if st.button("🔍 Analyze News"):
         )
 
 
-        # -----------------------------------
-        # PROBABILITIES
-        # -----------------------------------
+        # ===================================
+        # CONFIDENCE WARNING
+        # ===================================
 
-        st.subheader("Prediction Probabilities")
+        if confidence < 60:
 
-        real_probability = probabilities[0] * 100
-        fake_probability = probabilities[1] * 100
+            st.warning(
+                "⚠️ Low-confidence prediction. "
+                "The model is uncertain about this article."
+            )
+
+        elif confidence < 75:
+
+            st.info(
+                "ℹ️ Moderate-confidence prediction."
+            )
+
+        else:
+
+            st.success(
+                "Model has relatively high confidence "
+                "in this prediction."
+            )
+
+
+        # ===================================
+        # PREDICTION PROBABILITIES
+        # ===================================
+
+        st.subheader(
+            "Prediction Probabilities"
+        )
+
 
         st.write(
-            f"🟢 Real News Probability: {real_probability:.2f}%"
+            f"🟢 Real News Probability: "
+            f"{real_probability:.2f}%"
         )
 
         st.write(
-            f"🔴 Fake News Probability: {fake_probability:.2f}%"
+            f"🔴 Fake News Probability: "
+            f"{fake_probability:.2f}%"
+        )
+
+
+        # ===================================
+        # PROBABILITY BAR
+        # ===================================
+
+        probability_df = pd.DataFrame(
+            {
+                "Probability": [
+                    real_probability,
+                    fake_probability
+                ]
+            },
+            index=[
+                "Real News",
+                "Fake News"
+            ]
+        )
+
+        st.bar_chart(
+            probability_df
         )
 
 
@@ -118,87 +223,148 @@ if st.button("🔍 Analyze News"):
         # EXPLAINABLE AI
         # ===================================
 
-        st.subheader("🔍 Explainable AI")
+        st.subheader(
+            "🔍 Explainable AI"
+        )
 
         st.write(
-            "The following words were important features present "
-            "in the news text according to the Random Forest model."
+            "These are the most influential TF-IDF "
+            "features present in the input according "
+            "to the Random Forest model."
         )
 
 
-        # Get all TF-IDF feature names
-        feature_names = tfidf.get_feature_names_out()
+        # -----------------------------------
+        # TF-IDF FEATURE NAMES
+        # -----------------------------------
 
-        # Get TF-IDF values for this news text
-        input_features = news_tfidf.toarray()[0]
-
-        # Get indices of words present in the input
-        non_zero_indices = input_features.nonzero()[0]
-
-        # Get Random Forest feature importance
-        feature_importance = model.feature_importances_
+        feature_names = (
+            tfidf.get_feature_names_out()
+        )
 
 
         # -----------------------------------
+        # INPUT TF-IDF VALUES
+        # -----------------------------------
+
+        input_features = (
+            news_tfidf.toarray()[0]
+        )
+
+
+        # -----------------------------------
+        # FEATURES PRESENT IN INPUT
+        # -----------------------------------
+
+        non_zero_indices = (
+            input_features.nonzero()[0]
+        )
+
+
+        # -----------------------------------
+        # RANDOM FOREST IMPORTANCE
+        # -----------------------------------
+
+        feature_importance = (
+            model.feature_importances_
+        )
+
+
+        # ===================================
         # CREATE EXPLANATION DATA
-        # -----------------------------------
+        # ===================================
 
         explanation_data = []
+
 
         for index in non_zero_indices:
 
             word = feature_names[index]
 
-            importance = feature_importance[index]
+            importance = (
+                feature_importance[index]
+            )
 
-            tfidf_score = input_features[index]
+            tfidf_score = (
+                input_features[index]
+            )
 
-            influence = importance * tfidf_score
+            influence = (
+                importance * tfidf_score
+            )
 
-            explanation_data.append({
-                "Word": word,
-                "Feature Importance": importance,
-                "TF-IDF Score": tfidf_score,
-                "Influence": influence
-            })
-
-
-        # -----------------------------------
-        # CREATE DATAFRAME
-        # -----------------------------------
-
-        explanation_df = pd.DataFrame(explanation_data)
+            explanation_data.append(
+                {
+                    "Word": word,
+                    "Feature Importance": importance,
+                    "TF-IDF Score": tfidf_score,
+                    "Influence": influence
+                }
+            )
 
 
-        # Sort by influence
-        explanation_df = explanation_df.sort_values(
-            by="Influence",
-            ascending=False
+        # ===================================
+        # EXPLANATION DATAFRAME
+        # ===================================
+
+        explanation_df = pd.DataFrame(
+            explanation_data
         )
 
 
-        # Get top 10 influential words
-        top_features = explanation_df.head(10)
+        if explanation_df.empty:
+
+            st.info(
+                "No vocabulary features from the "
+                "saved TF-IDF vectorizer were found "
+                "in this article."
+            )
+
+        else:
+
+            explanation_df = (
+                explanation_df.sort_values(
+                    by="Influence",
+                    ascending=False
+                )
+            )
 
 
-        # -----------------------------------
-        # DISPLAY TOP WORDS
-        # -----------------------------------
+            # ===================================
+            # TOP 10 FEATURES
+            # ===================================
 
-        st.subheader("🏆 Top 10 Influential Words")
-
-        st.dataframe(
-            top_features,
-            use_container_width=True
-        )
+            top_features = (
+                explanation_df.head(10)
+            )
 
 
-        # -----------------------------------
-        # FEATURE INFLUENCE CHART
-        # -----------------------------------
+            st.subheader(
+                "🏆 Top 10 Influential Words"
+            )
 
-        st.subheader("📊 Feature Influence Chart")
 
-        chart_data = top_features.set_index("Word")["Influence"]
+            st.dataframe(
+                top_features,
+                width="stretch"
+            )
 
-        st.bar_chart(chart_data)
+
+            # ===================================
+            # FEATURE INFLUENCE CHART
+            # ===================================
+
+            st.subheader(
+                "📊 Feature Influence Chart"
+            )
+
+
+            chart_data = (
+                top_features
+                .set_index("Word")["Influence"]
+            )
+
+
+            st.bar_chart(
+                chart_data
+            )
