@@ -1,0 +1,14 @@
+.git
+.github
+.dvc
+dvc.yaml
+dvc.lock
+data
+notebooks
+__pycache__
+.ipynb_checkpoints
+mlruns
+mlartifacts
+mlflow.db
+venv
+.venv
