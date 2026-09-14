@@ -1,60 +1,161 @@
 import streamlit as st
 import joblib
 import pandas as pd
+import pickle
+
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 
-# -----------------------------------
+# ============================================================
 # PAGE CONFIGURATION
-# -----------------------------------
+# ============================================================
 
 st.set_page_config(
-    page_title="Fake News Detection System",
+    page_title="News Intelligence System",
     page_icon="📰",
     layout="centered"
 )
 
 
-# -----------------------------------
-# LOAD MODEL AND TF-IDF VECTORIZER
-# -----------------------------------
+# ============================================================
+# LOAD MODELS
+# ============================================================
 
-model = joblib.load(
-    "models/random_forest_model.pkl"
+@st.cache_resource
+def load_models():
+
+    # Random Forest
+    model = joblib.load(
+        "models/random_forest_model.pkl"
+    )
+
+    # TF-IDF
+    tfidf = joblib.load(
+        "models/tfidf_vectorizer.pkl"
+    )
+
+    # LDA
+    lda_model = joblib.load(
+        "models/lda_topic_model.pkl"
+    )
+
+    # Topic vectorizer
+    topic_vectorizer = joblib.load(
+        "models/topic_vectorizer.pkl"
+    )
+
+    # Semantic artifacts
+    with open(
+        "models/semantic_topic_embeddings.pkl",
+        "rb"
+    ) as f:
+
+        semantic_artifacts = pickle.load(f)
+
+    topic_descriptions = semantic_artifacts[
+        "topic_descriptions"
+    ]
+
+    topic_embeddings = semantic_artifacts[
+        "topic_embeddings"
+    ]
+
+    # Sentence Transformer
+    semantic_model = SentenceTransformer(
+        "all-MiniLM-L6-v2"
+    )
+
+    return (
+        model,
+        tfidf,
+        lda_model,
+        topic_vectorizer,
+        topic_descriptions,
+        topic_embeddings,
+        semantic_model
+    )
+
+
+(
+    model,
+    tfidf,
+    lda_model,
+    topic_vectorizer,
+    topic_descriptions,
+    topic_embeddings,
+    semantic_model
+) = load_models()
+
+
+# ============================================================
+# ============================================================
+# APPLICATION HEADER
+# ============================================================
+
+st.title("📰 News Intelligence System")
+
+st.caption(
+    "AI-powered news classification, explainability, "
+    "topic discovery and semantic analysis"
 )
 
-tfidf = joblib.load(
-    "models/tfidf_vectorizer.pkl"
-)
+
+# MODEL / VECTORIZER VALIDATION
+# ============================================================
+
+if list(model.classes_) != [0, 1]:
+
+    st.error(
+        f"❌ Unexpected model classes: {model.classes_}"
+    )
+
+    st.stop()
 
 
-# -----------------------------------
-# APP TITLE
-# -----------------------------------
+if model.n_features_in_ != len(
+    tfidf.get_feature_names_out()
+):
 
-st.title("📰 Fake News Detection System")
+    st.error(
+        "❌ MODEL / TF-IDF FEATURE MISMATCH"
+    )
 
-st.write(
-    "Enter a news article or news text below to check whether "
-    "it is likely to be REAL or FAKE."
-)
+    st.write(
+        "Model expects:",
+        model.n_features_in_
+    )
+
+    st.write(
+        "TF-IDF provides:",
+        len(tfidf.get_feature_names_out())
+    )
+
+    st.stop()
 
 
-# -----------------------------------
+# Model/vectorizer validation passed internally.
+# Diagnostic details are intentionally hidden from the final UI.
+
+
+# ============================================================
 # USER INPUT
-# -----------------------------------
+# ============================================================
+
+st.subheader("📝 Enter News Article")
 
 news_text = st.text_area(
-    "Enter News Text:",
-    height=250,
-    placeholder="Paste the news article here..."
+    "Paste the complete news article:",
+    height=300,
+    placeholder="Paste the news title + article text here..."
 )
 
 
-# -----------------------------------
-# ANALYZE NEWS
-# -----------------------------------
+# ============================================================
+# ANALYZE
+# ============================================================
 
-if st.button("🔍 Analyze News"):
+if st.button("🔍 Analyze News", type="primary", use_container_width=True):
 
     if not news_text.strip():
 
@@ -62,309 +163,382 @@ if st.button("🔍 Analyze News"):
             "Please enter some news text."
         )
 
+        st.stop()
+
+
+    # ========================================================
+    # Input diagnostics are intentionally hidden in the final UI.\n\n\n# TF-IDF TRANSFORMATION
+    # ========================================================
+
+    news_tfidf = tfidf.transform(
+        [news_text]
+    )
+
+    recognized_features = news_tfidf.nnz
+
+    total_features = news_tfidf.shape[1]
+
+    st.write(
+        "Recognized TF-IDF features:",
+        recognized_features
+    )
+
+    st.write(
+        "Total TF-IDF features:",
+        total_features
+    )
+
+
+    if recognized_features == 0:
+
+        st.error(
+            "❌ ZERO vocabulary features recognized!"
+        )
+
+        st.warning(
+            "The model cannot make a meaningful "
+            "prediction from this input."
+        )
+
+        st.stop()
+
+
+    # ========================================================
+    # RAW MODEL PREDICTION
+    # ========================================================
+
+    prediction = model.predict(
+        news_tfidf
+    )[0]
+
+    probabilities = model.predict_proba(
+        news_tfidf
+    )[0]
+
+
+    # ========================================================
+    # IMPORTANT:
+    # MAP PROBABILITIES USING MODEL CLASSES
+    # ========================================================
+
+    class_probabilities = dict(
+        zip(
+            model.classes_,
+            probabilities
+        )
+    )
+
+    fake_probability = (
+        class_probabilities[0] * 100
+    )
+
+    real_probability = (
+        class_probabilities[1] * 100
+    )
+
+    confidence = max(
+        fake_probability,
+        real_probability
+    )
+
+
+    # ========================================================
+    # Raw model diagnostics are intentionally hidden in the final UI.\n\n\n# FINAL PREDICTION
+    # ========================================================
+
+    st.subheader(
+        "🎯 Prediction"
+    )
+
+    if prediction == 0:
+
+        st.error(
+            "🚨 FAKE NEWS DETECTED"
+        )
+
+    elif prediction == 1:
+
+        st.success(
+            "✅ REAL NEWS DETECTED"
+        )
+
     else:
 
-        # ===================================
-        # TF-IDF TRANSFORMATION
-        # ===================================
-
-        news_tfidf = tfidf.transform(
-            [news_text]
+        st.error(
+            f"Unexpected prediction: {prediction}"
         )
 
 
-        # -----------------------------------
-        # FEATURE COVERAGE
-        # -----------------------------------
-
-        recognized_features = news_tfidf.nnz
-        total_features = news_tfidf.shape[1]
-
-        st.caption(
-            f"Recognized TF-IDF features: "
-            f"{recognized_features} / {total_features}"
-        )
+    st.metric(
+        "Model Confidence",
+        f"{confidence:.2f}%"
+    )
 
 
-        # ===================================
-        # MODEL PREDICTION
-        # ===================================
+    # ========================================================
+    # PROBABILITY BREAKDOWN
+    # ========================================================
 
-        prediction = model.predict(
-            news_tfidf
-        )[0]
+    st.subheader(
+        "📊 Prediction Probabilities"
+    )
 
-        probabilities = model.predict_proba(
-            news_tfidf
-        )[0]
+    col1, col2 = st.columns(2)
 
-
-        # -----------------------------------
-        # CLASS MAPPING
-        #
-        # 0 = FAKE
-        # 1 = REAL
-        # -----------------------------------
-
-        fake_probability = (
-            probabilities[0] * 100
-        )
-
-        real_probability = (
-            probabilities[1] * 100
-        )
-
-        confidence = max(
-            fake_probability,
-            real_probability
-        )
-
-
-        # ===================================
-        # PREDICTION RESULT
-        # ===================================
-
-        st.subheader(
-            "Prediction Result"
-        )
-
-
-        if prediction == 0:
-
-            st.error(
-                "🚨 FAKE NEWS DETECTED"
-            )
-
-        else:
-
-            st.success(
-                "✅ REAL NEWS DETECTED"
-            )
-
-
-        # ===================================
-        # CONFIDENCE
-        # ===================================
+    with col1:
 
         st.metric(
-            "Model Confidence",
-            f"{confidence:.2f}%"
-        )
-
-
-        # ===================================
-        # CONFIDENCE WARNING
-        # ===================================
-
-        if confidence < 60:
-
-            st.warning(
-                "⚠️ Low-confidence prediction. "
-                "The model is uncertain about this article."
-            )
-
-        elif confidence < 75:
-
-            st.info(
-                "ℹ️ Moderate-confidence prediction."
-            )
-
-        else:
-
-            st.success(
-                "Model has relatively high confidence "
-                "in this prediction."
-            )
-
-
-        # ===================================
-        # PREDICTION PROBABILITIES
-        # ===================================
-
-        st.subheader(
-            "Prediction Probabilities"
-        )
-
-
-        st.write(
-            f"🟢 Real News Probability: "
-            f"{real_probability:.2f}%"
-        )
-
-        st.write(
-            f"🔴 Fake News Probability: "
+            "Fake News",
             f"{fake_probability:.2f}%"
         )
 
+    with col2:
 
-        # ===================================
-        # PROBABILITY BAR
-        # ===================================
+        st.metric(
+            "Real News",
+            f"{real_probability:.2f}%"
+        )
 
-        probability_df = pd.DataFrame(
-            {
-                "Probability": [
-                    real_probability,
-                    fake_probability
-                ]
-            },
-            index=[
-                "Real News",
-                "Fake News"
+
+    probability_df = pd.DataFrame(
+        {
+            "Probability": [
+                real_probability,
+                fake_probability
             ]
+        },
+        index=[
+            "Real News",
+            "Fake News"
+        ]
+    )
+
+    st.bar_chart(
+        probability_df
+    )
+
+
+    # ========================================================
+    # TOP INFLUENTIAL WORDS
+    # ========================================================
+
+    st.subheader(
+        "🔍 Explainable AI"
+    )
+
+    feature_names = (
+        tfidf.get_feature_names_out()
+    )
+
+    input_features = (
+        news_tfidf.toarray()[0]
+    )
+
+    non_zero_indices = (
+        input_features.nonzero()[0]
+    )
+
+    feature_importance = (
+        model.feature_importances_
+    )
+
+    explanation_data = []
+
+    for index in non_zero_indices:
+
+        word = feature_names[index]
+
+        importance = (
+            feature_importance[index]
         )
 
-        st.bar_chart(
-            probability_df
+        tfidf_score = (
+            input_features[index]
         )
 
-
-        # ===================================
-        # EXPLAINABLE AI
-        # ===================================
-
-        st.subheader(
-            "🔍 Explainable AI"
+        influence = (
+            importance * tfidf_score
         )
 
-        st.write(
-            "These are the most influential TF-IDF "
-            "features present in the input according "
-            "to the Random Forest model."
-        )
-
-
-        # -----------------------------------
-        # TF-IDF FEATURE NAMES
-        # -----------------------------------
-
-        feature_names = (
-            tfidf.get_feature_names_out()
-        )
-
-
-        # -----------------------------------
-        # INPUT TF-IDF VALUES
-        # -----------------------------------
-
-        input_features = (
-            news_tfidf.toarray()[0]
-        )
-
-
-        # -----------------------------------
-        # FEATURES PRESENT IN INPUT
-        # -----------------------------------
-
-        non_zero_indices = (
-            input_features.nonzero()[0]
-        )
-
-
-        # -----------------------------------
-        # RANDOM FOREST IMPORTANCE
-        # -----------------------------------
-
-        feature_importance = (
-            model.feature_importances_
-        )
-
-
-        # ===================================
-        # CREATE EXPLANATION DATA
-        # ===================================
-
-        explanation_data = []
-
-
-        for index in non_zero_indices:
-
-            word = feature_names[index]
-
-            importance = (
-                feature_importance[index]
-            )
-
-            tfidf_score = (
-                input_features[index]
-            )
-
-            influence = (
-                importance * tfidf_score
-            )
-
-            explanation_data.append(
-                {
-                    "Word": word,
-                    "Feature Importance": importance,
-                    "TF-IDF Score": tfidf_score,
-                    "Influence": influence
-                }
-            )
-
-
-        # ===================================
-        # EXPLANATION DATAFRAME
-        # ===================================
-
-        explanation_df = pd.DataFrame(
-            explanation_data
+        explanation_data.append(
+            {
+                "Word": word,
+                "Feature Importance": importance,
+                "TF-IDF Score": tfidf_score,
+                "Influence": influence
+            }
         )
 
 
-        if explanation_df.empty:
+    explanation_df = pd.DataFrame(
+        explanation_data
+    )
 
-            st.info(
-                "No vocabulary features from the "
-                "saved TF-IDF vectorizer were found "
-                "in this article."
+
+    if not explanation_df.empty:
+
+        explanation_df = (
+            explanation_df
+            .sort_values(
+                by="Influence",
+                ascending=False
             )
+            .head(10)
+        )
 
-        else:
-
-            explanation_df = (
-                explanation_df.sort_values(
-                    by="Influence",
-                    ascending=False
-                )
-            )
+        st.dataframe(
+            explanation_df,
+            width="stretch"
+        )
 
 
-            # ===================================
-            # TOP 10 FEATURES
-            # ===================================
+    # ========================================================
+    # LDA TOPIC MODELING
+    # ========================================================
 
-            top_features = (
-                explanation_df.head(10)
-            )
+    st.subheader(
+        "🧠 Topic Discovery"
+    )
+
+    topic_features = (
+        topic_vectorizer.transform(
+            [news_text]
+        )
+    )
+
+    topic_distribution = (
+        lda_model.transform(
+            topic_features
+        )[0]
+    )
+
+    dominant_topic = (
+        int(
+            topic_distribution.argmax()
+        ) + 1
+    )
+
+    topic_probability = (
+        topic_distribution[
+            dominant_topic - 1
+        ] * 100
+    )
+
+    topic_description = (
+        topic_descriptions.get(
+            dominant_topic,
+            "General News"
+        )
+    )
+
+    st.write(
+        f"Dominant Topic: Topic {dominant_topic}"
+    )
+
+    st.info(
+        f"📌 Topic Theme: {topic_description}"
+    )
+
+    st.metric(
+        "LDA Topic Probability",
+        f"{topic_probability:.2f}%"
+    )
 
 
-            st.subheader(
-                "🏆 Top 10 Influential Words"
-            )
+    # ========================================================
+    # SEMANTIC ANALYSIS
+    # ========================================================
+
+    st.subheader(
+        "🔎 Semantic Analysis"
+    )
+
+    article_embedding = (
+        semantic_model.encode(
+            [news_text],
+            convert_to_numpy=True
+        )
+    )
+
+    semantic_similarities = (
+        cosine_similarity(
+            article_embedding,
+            topic_embeddings
+        )[0]
+    )
+
+    semantic_topic_index = (
+        semantic_similarities.argmax()
+    )
+
+    semantic_topic = (
+        semantic_topic_index + 1
+    )
+
+    semantic_similarity = (
+        semantic_similarities[
+            semantic_topic_index
+        ]
+    )
+
+    semantic_description = (
+        topic_descriptions.get(
+            semantic_topic,
+            "General News"
+        )
+    )
+
+    st.write(
+        f"Semantic Topic: Topic {semantic_topic}"
+    )
+
+    st.info(
+        f"🧩 Semantic Theme: {semantic_description}"
+    )
+
+    st.metric(
+        "Semantic Similarity",
+        f"{semantic_similarity:.2%}"
+    )
 
 
-            st.dataframe(
-                top_features,
-                width="stretch"
-            )
+    # ========================================================
+    # FINAL SUMMARY
+    # ========================================================
+
+    st.subheader(
+        "📊 News Intelligence Summary"
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.metric(
+            "Classification",
+            "FAKE" if prediction == 0 else "REAL"
+        )
+
+        st.metric(
+            "Confidence",
+            f"{confidence:.2f}%"
+        )
+
+    with col2:
+
+        st.metric(
+            "LDA Topic",
+            f"Topic {dominant_topic}"
+        )
+
+        st.metric(
+            "Semantic Topic",
+            f"Topic {semantic_topic}"
+        )
 
 
-            # ===================================
-            # FEATURE INFLUENCE CHART
-            # ===================================
-
-            st.subheader(
-                "📊 Feature Influence Chart"
-            )
-
-
-            chart_data = (
-                top_features
-                .set_index("Word")["Influence"]
-            )
-
-
-            st.bar_chart(
-                chart_data
-            )
+    st.caption(
+        "⚠️ This system provides an ML-based "
+        "prediction and should not be treated as "
+        "an absolute determination of factual truth."
+    )
