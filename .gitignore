@@ -27,3 +27,4 @@ Thumbs.db
 /outputs/
 # Generated plots
 *.png
+.env
