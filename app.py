@@ -6,6 +6,13 @@ import pickle
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
+# LLM-based current-web fact verification
+from src.fact_verification import verify_news
+
+# Optional BERT classifier
+import torch
+from transformers import BertTokenizer, BertForSequenceClassification
+
 
 # ============================================================
 # PAGE CONFIGURATION
@@ -90,6 +97,33 @@ def load_models():
 
 # ============================================================
 # ============================================================
+# OPTIONAL BERT MODEL
+# ============================================================
+
+@st.cache_resource
+def load_bert_model():
+
+    model_path = "models/bert_news_classifier.pt"
+
+    try:
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        bert_model = BertForSequenceClassification.from_pretrained(
+            "bert-base-uncased",
+            num_labels=2
+        )
+        state_dict = torch.load(model_path, map_location="cpu")
+        bert_model.load_state_dict(state_dict)
+        bert_model.eval()
+        return tokenizer, bert_model
+
+    except Exception:
+        return None, None
+
+
+bert_tokenizer, bert_model = load_bert_model()
+
+
+# ============================================================
 # APPLICATION HEADER
 # ============================================================
 
@@ -149,6 +183,35 @@ news_text = st.text_area(
     height=300,
     placeholder="Paste the news title + article text here..."
 )
+
+
+# ============================================================
+# CURRENT WEB FACT VERIFICATION
+# ============================================================
+
+st.subheader("🌐 Current Web Fact Verification")
+st.caption(
+    "Uses Groq LLM + web search to evaluate factual claims "
+    "against current external evidence."
+)
+
+if st.button(
+    "🔎 Verify Facts with Current Web Evidence",
+    use_container_width=True
+):
+
+    if not news_text.strip():
+        st.warning("Please enter a news article first.")
+        st.stop()
+
+    with st.spinner(
+        "Extracting claims and searching current web evidence..."
+    ):
+        try:
+            verification_result = verify_news(news_text)
+            st.markdown(verification_result)
+        except Exception as e:
+            st.error(f"Fact verification failed: {e}")
 
 
 # ============================================================
@@ -537,8 +600,63 @@ if st.button("🔍 Analyze News", type="primary", use_container_width=True):
         )
 
 
+    # ========================================================
+    # OPTIONAL BERT CLASSIFICATION
+    # ========================================================
+
+    if bert_model is not None and bert_tokenizer is not None:
+
+        st.subheader("🤖 BERT Classification")
+        st.caption(
+            "Experimental transformer-based classifier trained "
+            "separately from the Random Forest model."
+        )
+
+        bert_inputs = bert_tokenizer(
+            news_text,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=256
+        )
+
+        with torch.no_grad():
+            bert_outputs = bert_model(**bert_inputs)
+
+        bert_probabilities = torch.softmax(
+            bert_outputs.logits, dim=1
+        )[0]
+
+        bert_prediction = int(
+            torch.argmax(bert_probabilities).item()
+        )
+
+        bert_confidence = float(
+            bert_probabilities[bert_prediction]
+        ) * 100
+
+        bert_label = "FAKE" if bert_prediction == 0 else "REAL"
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("BERT Prediction", bert_label)
+
+        with col2:
+            st.metric(
+                "BERT Confidence",
+                f"{bert_confidence:.2f}%"
+            )
+
+    else:
+        st.info(
+            "BERT model artifact not available. "
+            "The Random Forest pipeline remains the primary classifier."
+        )
+
+
     st.caption(
-        "⚠️ This system provides an ML-based "
-        "prediction and should not be treated as "
-        "an absolute determination of factual truth."
+        "⚠️ This system provides ML-based predictions and "
+        "evidence-based web verification. It should not be "
+        "treated as an absolute determination of factual truth."
     )
